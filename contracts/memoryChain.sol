@@ -1,1 +1,468 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
 
+/**
+ * @title MemoryChain
+ * @dev A decentralized platform for preserving digital memories, stories, and legacies across generations
+ * @author MemoryChain Team
+ */
+
+contract MemoryChain {
+    // Memory capsule types
+    enum CapsuleType {
+        PERSONAL_STORY,
+        FAMILY_HISTORY,
+        ACHIEVEMENT,
+        WISDOM_ADVICE,
+        MULTIMEDIA_MEMORY,
+        TIME_CAPSULE
+    }
+    
+    // Access levels for memory capsules
+    enum AccessLevel {
+        PUBLIC,
+        FAMILY_ONLY,
+        PRIVATE,
+        TIMED_RELEASE
+    }
+    
+    // Memory capsule structure
+    struct MemoryCapsule {
+        uint256 id;
+        address creator;
+        string title;
+        string contentHash; // IPFS hash for content (text, images, videos)
+        CapsuleType capsuleType;
+        AccessLevel accessLevel;
+        uint256 creationTime;
+        uint256 releaseTime; // For timed releases or inheritance
+        uint256 viewCount;
+        uint256 preservationFee;
+        bool isActive;
+        string[] tags;
+        address[] authorizedViewers; // For family/private access
+        uint256 emotionalValue; // Community-rated emotional significance
+    }
+    
+    // Digital inheritance structure
+    struct DigitalWill {
+        address testator;
+        address[] beneficiaries;
+        uint256[] capsuleIds;
+        mapping(address => bool) hasAccepted;
+        uint256 activationTime;
+        bool isExecuted;
+        string lastWords; // IPFS hash for final message
+        uint256 creationTime;
+    }
+    
+    // User profile structure
+    struct UserProfile {
+        string username;
+        string bio;
+        uint256 totalMemories;
+        uint256 totalViews;
+        uint256 reputationScore;
+        bool isLegacyPreserver; // Authorized to help preserve others' memories
+        uint256 joinedTime;
+        uint256 lastActivity;
+        string profileImageHash;
+    }
+    
+    // State variables
+    address public owner;
+    uint256 public nextCapsuleId;
+    uint256 public nextWillId;
+    uint256 public totalMemoriesPreserved;
+    uint256 public constant PRESERVATION_FEE = 0.001 ether; // Base fee for memory preservation
+    uint256 public constant LEGACY_PRESERVER_STAKE = 0.1 ether;
+    
+    // Mappings
+    mapping(uint256 => MemoryCapsule) public memoryCapsules;
+    mapping(uint256 => DigitalWill) public digitalWills;
+    mapping(address => UserProfile) public userProfiles;
+    mapping(address => uint256[]) public userMemories;
+    mapping(address => uint256) public userWillId;
+    mapping(string => uint256[]) public memoriesByTag;
+    mapping(address => mapping(uint256 => bool)) public hasViewed;
+    mapping(address => uint256) public legacyPreserverStakes;
+    mapping(uint256 => mapping(address => uint256)) public memoryRatings;
+    
+    // Events
+    event MemoryCreated(uint256 indexed capsuleId, address indexed creator, CapsuleType capsuleType);
+    event MemoryViewed(uint256 indexed capsuleId, address indexed viewer);
+    event DigitalWillCreated(address indexed testator, uint256 indexed willId);
+    event WillExecuted(uint256 indexed willId, address indexed testator);
+    event LegacyPreserverAuthorized(address indexed preserver, uint256 stakeAmount);
+    event MemoryRated(uint256 indexed capsuleId, address indexed rater, uint256 rating);
+    event TimeCapsuleReleased(uint256 indexed capsuleId, uint256 releaseTime);
+    event MemoryInherited(uint256 indexed capsuleId, address indexed beneficiary);
+    
+    // Modifiers
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not the contract owner");
+        _;
+    }
+    
+    modifier validCapsule(uint256 _capsuleId) {
+        require(_capsuleId < nextCapsuleId && memoryCapsules[_capsuleId].isActive, "Invalid or inactive capsule");
+        _;
+    }
+    
+    modifier onlyCreator(uint256 _capsuleId) {
+        require(memoryCapsules[_capsuleId].creator == msg.sender, "Not the memory creator");
+        _;
+    }
+    
+    modifier onlyLegacyPreserver() {
+        require(userProfiles[msg.sender].isLegacyPreserver, "Not an authorized legacy preserver");
+        _;
+    }
+    
+    constructor() {
+        owner = msg.sender;
+        nextCapsuleId = 1;
+        nextWillId = 1;
+    }
+    
+    /**
+     * @dev Core Function 1: Create a digital memory capsule with preservation
+     * @param _title The title of the memory
+     * @param _contentHash IPFS hash containing the memory content
+     * @param _capsuleType Type of memory capsule
+     * @param _accessLevel Access level for the memory
+     * @param _releaseTime Time when memory becomes accessible (for timed capsules)
+     * @param _tags Array of tags for categorization
+     * @param _authorizedViewers Array of addresses authorized to view (for private/family memories)
+     */
+    function createMemoryCapsule(
+        string memory _title,
+        string memory _contentHash,
+        CapsuleType _capsuleType,
+        AccessLevel _accessLevel,
+        uint256 _releaseTime,
+        string[] memory _tags,
+        address[] memory _authorizedViewers
+    ) external payable {
+        require(bytes(_title).length > 0, "Title required");
+        require(bytes(_contentHash).length > 0, "Content hash required");
+        require(msg.value >= PRESERVATION_FEE, "Insufficient preservation fee");
+        
+        // Validate release time for timed capsules
+        if (_accessLevel == AccessLevel.TIMED_RELEASE) {
+            require(_releaseTime > block.timestamp, "Release time must be in the future");
+        }
+        
+        // Create user profile if first memory
+        if (userProfiles[msg.sender].joinedTime == 0) {
+            userProfiles[msg.sender] = UserProfile({
+                username: "",
+                bio: "",
+                totalMemories: 0,
+                totalViews: 0,
+                reputationScore: 100,
+                isLegacyPreserver: false,
+                joinedTime: block.timestamp,
+                lastActivity: block.timestamp,
+                profileImageHash: ""
+            });
+        }
+        
+        // Create the memory capsule
+        MemoryCapsule storage newCapsule = memoryCapsules[nextCapsuleId];
+        newCapsule.id = nextCapsuleId;
+        newCapsule.creator = msg.sender;
+        newCapsule.title = _title;
+        newCapsule.contentHash = _contentHash;
+        newCapsule.capsuleType = _capsuleType;
+        newCapsule.accessLevel = _accessLevel;
+        newCapsule.creationTime = block.timestamp;
+        newCapsule.releaseTime = _releaseTime;
+        newCapsule.preservationFee = msg.value;
+        newCapsule.isActive = true;
+        newCapsule.tags = _tags;
+        newCapsule.authorizedViewers = _authorizedViewers;
+        
+        // Update user data
+        userMemories[msg.sender].push(nextCapsuleId);
+        userProfiles[msg.sender].totalMemories++;
+        userProfiles[msg.sender].lastActivity = block.timestamp;
+        
+        // Add to tag mappings
+        for (uint256 i = 0; i < _tags.length; i++) {
+            memoriesByTag[_tags[i]].push(nextCapsuleId);
+        }
+        
+        totalMemoriesPreserved++;
+        
+        emit MemoryCreated(nextCapsuleId, msg.sender, _capsuleType);
+        nextCapsuleId++;
+    }
+    
+    /**
+     * @dev Core Function 2: Create a digital will for memory inheritance
+     * @param _beneficiaries Array of addresses who will inherit memories
+     * @param _capsuleIds Array of memory capsule IDs to include in the will
+     * @param _activationTime Time when the will becomes active (inheritance trigger)
+     * @param _lastWordsHash IPFS hash containing final message to beneficiaries
+     */
+    function createDigitalWill(
+        address[] memory _beneficiaries,
+        uint256[] memory _capsuleIds,
+        uint256 _activationTime,
+        string memory _lastWordsHash
+    ) external {
+        require(_beneficiaries.length > 0, "At least one beneficiary required");
+        require(_capsuleIds.length > 0, "At least one memory required");
+        require(_activationTime > block.timestamp, "Activation time must be in the future");
+        require(userWillId[msg.sender] == 0, "Will already exists");
+        
+        // Verify ownership of all capsules
+        for (uint256 i = 0; i < _capsuleIds.length; i++) {
+            require(memoryCapsules[_capsuleIds[i]].creator == msg.sender, "Not owner of all memories");
+        }
+        
+        // Create the digital will
+        DigitalWill storage newWill = digitalWills[nextWillId];
+        newWill.testator = msg.sender;
+        newWill.beneficiaries = _beneficiaries;
+        newWill.capsuleIds = _capsuleIds;
+        newWill.activationTime = _activationTime;
+        newWill.lastWords = _lastWordsHash;
+        newWill.creationTime = block.timestamp;
+        
+        userWillId[msg.sender] = nextWillId;
+        
+        emit DigitalWillCreated(msg.sender, nextWillId);
+        nextWillId++;
+    }
+    
+    /**
+     * @dev Core Function 3: Access and view memory capsules with permission checks
+     * @param _capsuleId The ID of the memory capsule to view
+     * @return capsule The memory capsule data
+     * @return canView Whether the caller can view this memory
+     * @return viewCost The cost to view this memory (if any)
+     */
+    function viewMemoryCapsule(uint256 _capsuleId) 
+        external 
+        validCapsule(_capsuleId) 
+        returns (
+            MemoryCapsule memory capsule,
+            bool canView,
+            uint256 viewCost
+        ) 
+    {
+        MemoryCapsule storage memory_capsule = memoryCapsules[_capsuleId];
+        canView = _canViewMemory(_capsuleId, msg.sender);
+        viewCost = 0;
+        
+        if (canView && !hasViewed[msg.sender][_capsuleId]) {
+            // Update view statistics
+            memory_capsule.viewCount++;
+            hasViewed[msg.sender][_capsuleId] = true;
+            userProfiles[memory_capsule.creator].totalViews++;
+            
+            // Update reputation score for creator
+            userProfiles[memory_capsule.creator].reputationScore += 1;
+            
+            emit MemoryViewed(_capsuleId, msg.sender);
+        }
+        
+        return (memory_capsule, canView, viewCost);
+    }
+    
+    /**
+     * @dev Check if an address can view a specific memory
+     * @param _capsuleId The memory capsule ID
+     * @param _viewer The address requesting to view
+     * @return Whether the viewer has permission
+     */
+    function _canViewMemory(uint256 _capsuleId, address _viewer) internal view returns (bool) {
+        MemoryCapsule storage capsule = memoryCapsules[_capsuleId];
+        
+        // Creator can always view their own memories
+        if (capsule.creator == _viewer) return true;
+        
+        // Check access level permissions
+        if (capsule.accessLevel == AccessLevel.PUBLIC) {
+            return true;
+        } else if (capsule.accessLevel == AccessLevel.TIMED_RELEASE) {
+            return block.timestamp >= capsule.releaseTime;
+        } else if (capsule.accessLevel == AccessLevel.FAMILY_ONLY || capsule.accessLevel == AccessLevel.PRIVATE) {
+            // Check if viewer is in authorized list
+            for (uint256 i = 0; i < capsule.authorizedViewers.length; i++) {
+                if (capsule.authorizedViewers[i] == _viewer) return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * @dev Rate the emotional value of a memory (community curation)
+     * @param _capsuleId The memory capsule ID to rate
+     * @param _rating Rating from 1 to 10
+     */
+    function rateMemory(uint256 _capsuleId, uint256 _rating) 
+        external 
+        validCapsule(_capsuleId) 
+    {
+        require(_rating >= 1 && _rating <= 10, "Rating must be between 1 and 10");
+        require(memoryRatings[_capsuleId][msg.sender] == 0, "Already rated this memory");
+        require(_canViewMemory(_capsuleId, msg.sender), "Cannot rate inaccessible memory");
+        
+        memoryRatings[_capsuleId][msg.sender] = _rating;
+        
+        // Update emotional value (simple average for now)
+        MemoryCapsule storage capsule = memoryCapsules[_capsuleId];
+        capsule.emotionalValue = (capsule.emotionalValue + _rating) / 2;
+        
+        emit MemoryRated(_capsuleId, msg.sender, _rating);
+    }
+    
+    /**
+     * @dev Execute a digital will (can be called by beneficiaries after activation time)
+     * @param _willId The ID of the will to execute
+     */
+    function executeDigitalWill(uint256 _willId) external {
+        require(_willId < nextWillId, "Will does not exist");
+        DigitalWill storage will = digitalWills[_willId];
+        require(!will.isExecuted, "Will already executed");
+        require(block.timestamp >= will.activationTime, "Will not yet active");
+        
+        // Check if caller is a beneficiary
+        bool isBeneficiary = false;
+        for (uint256 i = 0; i < will.beneficiaries.length; i++) {
+            if (will.beneficiaries[i] == msg.sender) {
+                isBeneficiary = true;
+                break;
+            }
+        }
+        require(isBeneficiary, "Not a beneficiary");
+        
+        // Mark will as executed
+        will.isExecuted = true;
+        
+        // Transfer memory access to beneficiaries
+        for (uint256 i = 0; i < will.capsuleIds.length; i++) {
+            uint256 capsuleId = will.capsuleIds[i];
+            MemoryCapsule storage capsule = memoryCapsules[capsuleId];
+            
+            // Add all beneficiaries to authorized viewers
+            for (uint256 j = 0; j < will.beneficiaries.length; j++) {
+                capsule.authorizedViewers.push(will.beneficiaries[j]);
+                emit MemoryInherited(capsuleId, will.beneficiaries[j]);
+            }
+        }
+        
+        emit WillExecuted(_willId, will.testator);
+    }
+    
+    /**
+     * @dev Become a legacy preserver (authorized to help preserve others' memories)
+     */
+    function becomeLegacyPreserver() external payable {
+        require(msg.value >= LEGACY_PRESERVER_STAKE, "Insufficient stake");
+        require(!userProfiles[msg.sender].isLegacyPreserver, "Already a legacy preserver");
+        
+        legacyPreserverStakes[msg.sender] = msg.value;
+        userProfiles[msg.sender].isLegacyPreserver = true;
+        
+        emit LegacyPreserverAuthorized(msg.sender, msg.value);
+    }
+    
+    /**
+     * @dev Get memories by tag for discovery
+     * @param _tag The tag to search for
+     * @return Array of memory capsule IDs with the specified tag
+     */
+    function getMemoriesByTag(string memory _tag) 
+        external 
+        view 
+        returns (uint256[] memory) 
+    {
+        return memoriesByTag[_tag];
+    }
+    
+    /**
+     * @dev Get user's complete memory collection
+     * @param _user The address of the user
+     * @return Array of memory capsule IDs owned by the user
+     */
+    function getUserMemories(address _user) 
+        external 
+        view 
+        returns (uint256[] memory) 
+    {
+        return userMemories[_user];
+    }
+    
+    /**
+     * @dev Update user profile information
+     * @param _username New username
+     * @param _bio New biography
+     * @param _profileImageHash IPFS hash for profile image
+     */
+    function updateProfile(
+        string memory _username,
+        string memory _bio,
+        string memory _profileImageHash
+    ) external {
+        UserProfile storage profile = userProfiles[msg.sender];
+        profile.username = _username;
+        profile.bio = _bio;
+        profile.profileImageHash = _profileImageHash;
+        profile.lastActivity = block.timestamp;
+    }
+    
+    /**
+     * @dev Get platform statistics
+     * @return totalUsers Total number of users
+     * @return totalMemories Total memories preserved
+     * @return totalViews Total views across all memories
+     * @return activePreservers Number of active legacy preservers
+     */
+    function getPlatformStats() 
+        external 
+        view 
+        returns (
+            uint256 totalUsers,
+            uint256 totalMemories,
+            uint256 totalViews,
+            uint256 activePreservers
+        ) 
+    {
+        // Note: This is a simplified implementation
+        // In production, you'd maintain these counters more efficiently
+        totalMemories = totalMemoriesPreserved;
+        
+        // These would be maintained as state variables in a production system
+        totalUsers = nextCapsuleId; // Approximation
+        totalViews = 0; // Would need to be calculated
+        activePreservers = 0; // Would need to be calculated
+        
+        return (totalUsers, totalMemories, totalViews, activePreservers);
+    }
+    
+    /**
+     * @dev Emergency function to deactivate a memory (owner only)
+     * @param _capsuleId The memory capsule ID to deactivate
+     */
+    function deactivateMemory(uint256 _capsuleId) 
+        external 
+        onlyOwner 
+        validCapsule(_capsuleId) 
+    {
+        memoryCapsules[_capsuleId].isActive = false;
+    }
+    
+    /**
+     * @dev Withdraw accumulated preservation fees (owner only)
+     */
+    function withdrawFees() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No fees to withdraw");
+        payable(owner).transfer(balance);
+    }
+}
